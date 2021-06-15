@@ -31,6 +31,8 @@ def get_args_parser():
     # Model parameters
     parser.add_argument('--frozen_weights', type=str, default=None,
                         help="Path to the pretrained model. If set, only the mask head will be trained")
+    parser.add_argument('--pretrained', type=str, default=None,
+                        help="Path to the pretrained model. If set, only the mask head will be trained")
     # * Backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
                         help="Name of the convolutional backbone to use")
@@ -123,7 +125,7 @@ def main(args):
 
     model_without_ddp = model
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
         model_without_ddp = model.module
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
@@ -180,6 +182,29 @@ def main(args):
             optimizer.load_state_dict(checkpoint['optimizer'])
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             args.start_epoch = checkpoint['epoch'] + 1
+    elif args.pretrained:
+        checkpoint = torch.load(args.pretrained, map_location='cpu')
+        if 'model' in checkpoint:
+            checkpoint = checkpoint['model']
+        if args.eval:
+            model_without_ddp.load_state_dict(checkpoint, strict=True)
+        else:
+            print(type(checkpoint))
+            new_checkpoint = {}
+            for k in checkpoint:
+                k1 = k.replace('backbone.bottom_up.', 'backbone.0.body.')
+                if not k1.__contains__('backbone.0.body.'):
+                    k1 = 'backbone.0.body.'+k1
+                new_checkpoint[k1] = checkpoint[k]
+            res = model_without_ddp.load_state_dict(new_checkpoint, strict=False)
+            # print(res)
+            for k in res.missing_keys:
+                if not k.__contains__('transformer.encoder') and not k.__contains__('transformer.decoder'):
+                    print(k)
+            print('unexcep======')
+            for k in res.unexpected_keys:
+                if not k.__contains__('transformer.encoder') and not k.__contains__('transformer.decoder'):
+                    print(k)
 
     if args.eval:
         test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
@@ -200,7 +225,7 @@ def main(args):
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             # extra checkpoint before LR drop and every 100 epochs
-            if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 100 == 0:
+            if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 10 == 0:
                 checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
             for checkpoint_path in checkpoint_paths:
                 utils.save_on_master({

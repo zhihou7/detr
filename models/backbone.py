@@ -117,3 +117,58 @@ def build_backbone(args):
     model = Joiner(backbone, position_embedding)
     model.num_channels = backbone.num_channels
     return model
+
+class SwinBackbone(nn.Module):
+    def __init__(self, name: str,
+                 train_backbone: bool,
+                 return_interm_layers: bool,
+                 dilation: bool):
+        super().__init__()
+        from models.swin_transformer1 import SwinTransformer
+        self.body = SwinTransformer(
+            patch_size=4,
+            in_chans=3,
+            embed_dim=96,
+            depths=[2, 2, 6, 2],
+            num_heads=[3, 6, 12, 24],
+            window_size=7,
+            mlp_ratio=4,
+            qkv_bias=True,
+            qk_scale=None,
+            drop_rate=0.,
+            attn_drop_rate=0.,
+            drop_path_rate=0.2,
+            norm_layer=nn.LayerNorm,
+            ape=False,
+            patch_norm=True,
+            frozen_stages=-1,
+            out_features=["stage2", "stage3", "stage4", "stage5"]
+        )
+        if return_interm_layers:
+            return_layers = {"stage2": "0", "stage3": "1", "stage4": "2", "stage5": "3"}
+        else:
+            return_layers = {'stage5': "0"}
+        num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
+        self.num_channels = 768
+
+    def forward(self, tensor_list: NestedTensor):
+        xs = self.body(tensor_list.tensors)
+        out: Dict[str, NestedTensor] = {}
+        for name, x in xs.items():
+            m = tensor_list.mask
+            assert m is not None
+            mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]
+            out[name] = NestedTensor(x, mask)
+        return out
+
+
+def build_swin_backbone(args):
+    from models.position_encoding import build_position_encoding
+    position_embedding = build_position_encoding(args)
+    train_backbone = args.lr_backbone > 0
+    return_interm_layers = args.masks
+    backbone = SwinBackbone(args.backbone, train_backbone, return_interm_layers, args.dilation)
+    model = Joiner(backbone, position_embedding)
+    model.num_channels = backbone.num_channels
+
+    return model

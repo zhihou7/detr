@@ -317,7 +317,11 @@ def build(args):
         num_classes = 250
     device = torch.device(args.device)
 
-    backbone = build_backbone(args)
+    if args.backbone.__contains__('swin'):
+        from .backbone import build_swin_backbone
+        backbone = build_swin_backbone(args)
+    else:
+        backbone = build_backbone(args)
 
     transformer = build_transformer(args)
 
