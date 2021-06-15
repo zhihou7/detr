@@ -1,0 +1,15 @@
+#!/bin/bash
+#PBS -P ZHIHOU
+#PBS -l select=8:ngpus=1:ncpus=6:mem=24GB
+#PBS -l walltime=72:00:00
+#PBS -q alloc-dt
+source activate pyt
+
+#env
+
+cd "$PBS_O_WORKDIR"
+
+
+python run.py --nproc_per_node 1 --master_port 29541 --nnodes 8 ./configs/swin.sh &> swin8.out
+#python run.py --nproc_per_node 2 --master_port 29541 --nnodes 2 ./configs/swin.sh
+
