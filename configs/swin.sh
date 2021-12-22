@@ -5,9 +5,5 @@ conda activate pyt
 
 set -x
 
-python main.py --coco_path /project/ZHIHOU/Dataset/coco/ \
---backbone swin \
---enc_layers 6 \
---dec_layers 6 \
---pretrained ../HOI-CL-OneStage/faster_rcnn_swin_T_d.pth
+python main.py --coco_path /project/ZHIHOU/Dataset/coco/ --bf 3 --batch_size 2 --output_dir output_bf3_7 --resume output_bf3_7/checkpoint.pth
 

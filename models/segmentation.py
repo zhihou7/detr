@@ -45,7 +45,17 @@ class DETRsegm(nn.Module):
         assert mask is not None
         src_proj = self.detr.input_proj(src)
         hs, memory = self.detr.transformer(src_proj, mask, self.detr.query_embed.weight, pos[-1])
-
+        feat2 = features[2].tensors
+        feat1 = features[1].tensors
+        feat0 = features[0].tensors
+        if len(memory) > len(src_proj):
+            mask = torch.cat([mask, mask], dim=0)
+            bs = bs + bs
+            src_proj = torch.cat([src_proj, src_proj], dim=0)
+            feat2 = torch.cat([feat2, feat2], dim=0)
+            feat1 = torch.cat([feat1, feat1], dim=0)
+            feat0 = torch.cat([feat0, feat0], dim=0)
+        # import ipdb;ipdb.set_trace()
         outputs_class = self.detr.class_embed(hs)
         outputs_coord = self.detr.bbox_embed(hs).sigmoid()
         out = {"pred_logits": outputs_class[-1], "pred_boxes": outputs_coord[-1]}
@@ -55,7 +65,7 @@ class DETRsegm(nn.Module):
         # FIXME h_boxes takes the last one computed, keep this in mind
         bbox_mask = self.bbox_attention(hs[-1], memory, mask=mask)
 
-        seg_masks = self.mask_head(src_proj, bbox_mask, [features[2].tensors, features[1].tensors, features[0].tensors])
+        seg_masks = self.mask_head(src_proj, bbox_mask, [feat2, feat1, feat0])
         outputs_seg_masks = seg_masks.view(bs, self.detr.num_queries, seg_masks.shape[-2], seg_masks.shape[-1])
 
         out["pred_masks"] = outputs_seg_masks

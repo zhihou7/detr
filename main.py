@@ -96,6 +96,8 @@ def get_args_parser():
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--num_workers', default=2, type=int)
+    parser.add_argument('--bf', default=0, type=int)
+    parser.add_argument('--use_checkpoint', action='store_true')
 
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,
@@ -168,7 +170,7 @@ def main(args):
 
     if args.frozen_weights is not None:
         checkpoint = torch.load(args.frozen_weights, map_location='cpu')
-        model_without_ddp.detr.load_state_dict(checkpoint['model'])
+        model_without_ddp.detr.load_state_dict(checkpoint['model'], False)
 
     output_dir = Path(args.output_dir)
     if args.resume:

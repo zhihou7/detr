@@ -20,19 +20,24 @@ class Transformer(nn.Module):
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
                  num_decoder_layers=6, dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False,
-                 return_intermediate_dec=False):
+                 return_intermediate_dec=False, args=None):
         super().__init__()
 
         encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before)
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
-        self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
+        bf = None
+        if args is not None and args.bf:
+            self.use_checkpoint = args.use_checkpoint
+            bf = torch.nn.TransformerEncoderLayer(d_model, 4, d_model, dropout=0.5)
+        self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm, bf=bf, bf_idx = args.bf,
+                                          use_checkpoint=args.use_checkpoint)
 
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before)
         decoder_norm = nn.LayerNorm(d_model)
         self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm,
-                                          return_intermediate=return_intermediate_dec)
+                                          return_intermediate=return_intermediate_dec, use_checkpoint=args.use_checkpoint)
 
         self._reset_parameters()
 
@@ -54,18 +59,41 @@ class Transformer(nn.Module):
 
         tgt = torch.zeros_like(query_embed)
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
-        hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
+        if memory.shape[1] > bs:
+            tgt = torch.cat([tgt,tgt], dim=1)
+            mask = torch.cat([mask, mask], dim=0)
+            pos_embed = torch.cat([pos_embed, pos_embed], dim=1)
+            query_embed = torch.cat([query_embed, query_embed], dim=1)
+            bs = bs * 2
+        if self.use_checkpoint:
+            print('use checkpoint')
+            from torch.utils import checkpoint
+            # output = checkpoint.checkpoint(layer, output, mask, src_key_padding_mask, pos)
+            hs = checkpoint.checkpoint(self.decoder, tgt, memory, None, None, None, mask,
+                                       pos_embed, query_embed)
+        #     tgt, memory,
+        #                 tgt_mask: Optional[Tensor] = None,
+        #                 memory_mask: Optional[Tensor] = None,
+        #                 tgt_key_padding_mask: Optional[Tensor] = None,
+        #                 memory_key_padding_mask: Optional[Tensor] = None,
+        #                 pos: Optional[Tensor] = None,
+        #                 query_pos: Optional[Tensor] = None):
+        else:
+            hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
                           pos=pos_embed, query_pos=query_embed)
         return hs.transpose(1, 2), memory.permute(1, 2, 0).view(bs, c, h, w)
 
 
 class TransformerEncoder(nn.Module):
 
-    def __init__(self, encoder_layer, num_layers, norm=None):
+    def __init__(self, encoder_layer, num_layers, norm=None, bf=None, bf_idx =0, use_checkpoint=False):
         super().__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
+        self.bf = bf
+        self.bf_idx = bf_idx
+        self.use_checkpoint = use_checkpoint
 
     def forward(self, src,
                 mask: Optional[Tensor] = None,
@@ -73,24 +101,53 @@ class TransformerEncoder(nn.Module):
                 pos: Optional[Tensor] = None):
         output = src
 
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
             output = layer(output, src_mask=mask,
-                           src_key_padding_mask=src_key_padding_mask, pos=pos)
+                src_key_padding_mask=src_key_padding_mask, pos=pos)
+            if self.bf is not None and self.bf_idx == 3 and self.training:
+                old_output = output
+                # import ipdb;ipdb.set_trace()
+                if i > 0:
+                    old_output = output[:, :len(output)//2, :]
+                    output = output[:, len(output)//2:, :]
+                output = self.bf(torch.transpose(output, 1, 0))
+                output = torch.transpose(output, 1, 0)
+                output = torch.cat([old_output, output], dim=1)
+                if i == 0:
+                    pos = torch.cat([pos, pos], dim=1)
+                    src_key_padding_mask = torch.cat([src_key_padding_mask, src_key_padding_mask], dim=0)
+            elif i == 4 and self.bf is not None and self.bf_idx == 2 and self.training:
+                old_output = output
+                output = self.bf(torch.transpose(output, 1, 0))
+                output = torch.transpose(output, 1, 0)
+                output = torch.cat([old_output, output], dim=1)
+                pos = torch.cat([pos, pos], dim=1)
+                src_key_padding_mask = torch.cat([src_key_padding_mask, src_key_padding_mask], dim=0)
+
 
         if self.norm is not None:
             output = self.norm(output)
-
+        if self.bf is not None and self.bf_idx == 1 and self.training:
+            # print(output.shape, self.norm)
+            # import ipdb;ipdb.set_trace()
+            old_output = output
+            output = self.bf(torch.transpose(output, 1, 0))
+            output = torch.transpose(output, 1, 0)
+            output = torch.cat([old_output, output], dim=1)
+            pos = torch.cat([pos, pos], dim=1)
+            src_key_padding_mask = torch.cat([src_key_padding_mask, src_key_padding_mask], dim=0)
         return output
 
 
 class TransformerDecoder(nn.Module):
 
-    def __init__(self, decoder_layer, num_layers, norm=None, return_intermediate=False):
+    def __init__(self, decoder_layer, num_layers, norm=None, return_intermediate=False, use_checkpoint=False):
         super().__init__()
         self.layers = _get_clones(decoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
         self.return_intermediate = return_intermediate
+        self.use_checkpoint = use_checkpoint
 
     def forward(self, tgt, memory,
                 tgt_mask: Optional[Tensor] = None,
@@ -104,7 +161,15 @@ class TransformerDecoder(nn.Module):
         intermediate = []
 
         for layer in self.layers:
-            output = layer(output, memory, tgt_mask=tgt_mask,
+            if self.use_checkpoint:
+                from torch.utils import checkpoint
+                output = checkpoint.checkpoint(layer, output, memory, tgt_mask,
+                                               memory_mask,
+                                               tgt_key_padding_mask,
+                                               memory_key_padding_mask,
+                                               pos, query_pos)
+            else:
+                output = layer(output, memory, tgt_mask=tgt_mask,
                            memory_mask=memory_mask,
                            tgt_key_padding_mask=tgt_key_padding_mask,
                            memory_key_padding_mask=memory_key_padding_mask,
@@ -283,6 +348,7 @@ def build_transformer(args):
         num_decoder_layers=args.dec_layers,
         normalize_before=args.pre_norm,
         return_intermediate_dec=True,
+        args=args
     )
 
 
