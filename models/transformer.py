@@ -27,6 +27,7 @@ class Transformer(nn.Module):
                                                 dropout, activation, normalize_before)
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
         bf = None
+        self.use_checkpoint=False
         if args is not None and args.bf:
             self.use_checkpoint = args.use_checkpoint
             bf = torch.nn.TransformerEncoderLayer(d_model, 4, d_model, dropout=0.5)
