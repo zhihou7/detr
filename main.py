@@ -97,6 +97,7 @@ def get_args_parser():
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--bf', default=0, type=int)
+    parser.add_argument('--base_bf', default=0, type=int)
     parser.add_argument('--use_checkpoint', action='store_true')
 
     # distributed training parameters

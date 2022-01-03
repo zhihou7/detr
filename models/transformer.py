@@ -28,9 +28,14 @@ class Transformer(nn.Module):
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
         bf = None
         self.use_checkpoint=False
+        self.base_bf = 0
         if args is not None and args.bf:
             self.use_checkpoint = args.use_checkpoint
+            self.base_bf = args.base_bf
             bf = torch.nn.TransformerEncoderLayer(d_model, 4, d_model, dropout=0.5)
+        elif self.base_bf:
+            bf = torch.nn.Identity()
+            args.bf = 3
         self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm, bf=bf, bf_idx = args.bf,
                                           use_checkpoint=args.use_checkpoint)
 
