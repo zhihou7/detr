@@ -100,6 +100,10 @@ def get_args_parser():
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--bf', default=0, type=int)
     parser.add_argument('--base_bf', default=0, type=int)
+    parser.add_argument('--bf_lr', default=1., type=float)
+    parser.add_argument('--bt_decay', default=1e-4, type=float)
+    parser.add_argument('--share_bf', default=1, type=int)
+    parser.add_argument('--start_idx', default=0, type=int)
     parser.add_argument('--use_checkpoint', action='store_true')
 
     # distributed training parameters
@@ -136,12 +140,15 @@ def main(args):
     print('number of params:', n_parameters)
 
     param_dicts = [
-        {"params": [p for n, p in model_without_ddp.named_parameters() if "backbone" not in n and p.requires_grad]},
+        {"params": [p for n, p in model_without_ddp.named_parameters() if "backbone" not in n and p.requires_grad and "bf" not in n]},
+        {"params": [p for n, p in model_without_ddp.named_parameters() if "backbone" not in n and "bf" in n and p.requires_grad],
+         "lr": args.lr*args.bf_lr, 'weight_decay': args.bt_decay},
         {
             "params": [p for n, p in model_without_ddp.named_parameters() if "backbone" in n and p.requires_grad],
             "lr": args.lr_backbone,
         },
     ]
+    print([n for n, p in model_without_ddp.named_parameters() if "backbone" not in n and "bf" in n and p.requires_grad])
     optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,
                                   weight_decay=args.weight_decay)
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
