@@ -104,6 +104,8 @@ def get_args_parser():
     parser.add_argument('--bt_decay', default=1e-4, type=float)
     parser.add_argument('--share_bf', default=1, type=int)
     parser.add_argument('--start_idx', default=0, type=int)
+    parser.add_argument('--insert_idx', action='append', type=int,
+                        help='insert idx list')
     parser.add_argument('--use_checkpoint', action='store_true')
 
     # distributed training parameters
@@ -115,6 +117,8 @@ def get_args_parser():
 
 def main(args):
     utils.init_distributed_mode(args)
+    if len(args.insert_idx) == 0:
+        args.insert_idx = [i for i in range(args.start_idx, args.enc_layers)]
     print("git:\n  {}\n".format(utils.get_sha()))
 
     if args.frozen_weights is not None:

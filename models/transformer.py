@@ -29,18 +29,18 @@ class Transformer(nn.Module):
         bf = None
         self.use_checkpoint=False
         self.base_bf = 0
-        start_idx = 0
+        insert_idx = 0
         if args is not None and args.bf:
             self.use_checkpoint = args.use_checkpoint
             self.base_bf = args.base_bf
-            start_idx = args.start_idx
+            insert_idx = args.insert_idx
             bf = torch.nn.TransformerEncoderLayer(d_model, 4, d_model, dropout=0.5)
             if not args.share_bf:
-                bf = torch.nn.ModuleList([torch.nn.TransformerEncoderLayer(d_model, 4, d_model, dropout=0.5) if i >=start_idx else torch.nn.Identity() for i in range(0, num_encoder_layers)])
+                bf = torch.nn.ModuleList([torch.nn.TransformerEncoderLayer(d_model, 4, d_model, dropout=0.5) if i in insert_idx else torch.nn.Identity() for i in range(0, num_encoder_layers)])
         elif self.base_bf:
             bf = torch.nn.Identity()
             args.bf = 3
-        self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm, bf=bf, bf_idx=args.bf, start_idx=start_idx,
+        self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm, bf=bf, bf_idx=args.bf, insert_idx=insert_idx,
                                           use_checkpoint=args.use_checkpoint)
 
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
@@ -96,7 +96,7 @@ class Transformer(nn.Module):
 
 class TransformerEncoder(nn.Module):
 
-    def __init__(self, encoder_layer, num_layers, norm=None, bf=None, bf_idx =0, start_idx=0, use_checkpoint=False):
+    def __init__(self, encoder_layer, num_layers, norm=None, bf=None, bf_idx =0, insert_idx=0, use_checkpoint=False):
         super().__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
@@ -105,7 +105,7 @@ class TransformerEncoder(nn.Module):
             self.bf = [bf]*num_layers
         else:
             self.bf = bf
-        self.start_idx = start_idx
+        self.insert_idx = insert_idx
         self.bf_idx = bf_idx
         self.use_checkpoint = use_checkpoint
 
@@ -118,15 +118,15 @@ class TransformerEncoder(nn.Module):
         for i, layer in enumerate(self.layers):
             output = layer(output, src_mask=mask,
                 src_key_padding_mask=src_key_padding_mask, pos=pos)
-            if i >= self.start_idx and self.bf is not None and self.bf_idx == 3 and self.training:
+            if i in self.insert_idx and self.bf is not None and self.bf_idx == 3 and self.training:
                 old_output = output
-                if i > self.start_idx:
+                if i != self.insert_idx[0]:
                     old_output = output[:, :len(output)//2, :]
                     output = output[:, len(output)//2:, :]
                 output = self.bf[i](torch.transpose(output, 1, 0))
                 output = torch.transpose(output, 1, 0)
                 output = torch.cat([old_output, output], dim=1)
-                if i == self.start_idx:
+                if i == self.insert_idx[0]:
                     pos = torch.cat([pos, pos], dim=1)
                     src_key_padding_mask = torch.cat([src_key_padding_mask, src_key_padding_mask], dim=0)
             elif i == 4 and self.bf is not None and self.bf_idx == 2 and self.training:
