@@ -117,7 +117,7 @@ def get_args_parser():
 
 def main(args):
     utils.init_distributed_mode(args)
-    if len(args.insert_idx) == 0:
+    if args.insert_idx is None or len(args.insert_idx) == 0:
         args.insert_idx = [i for i in range(args.start_idx, args.enc_layers)]
     print("git:\n  {}\n".format(utils.get_sha()))
 
