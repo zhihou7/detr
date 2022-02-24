@@ -29,7 +29,7 @@ class Transformer(nn.Module):
         self.bf = None
         self.use_checkpoint=False
         self.base_bf = 0
-        insert_idx = 0
+        insert_idx = []
         if args is not None and args.bf:
             self.use_checkpoint = args.use_checkpoint
             self.base_bf = args.base_bf
@@ -96,7 +96,7 @@ class Transformer(nn.Module):
 
 class TransformerEncoder(nn.Module):
 
-    def __init__(self, encoder_layer, num_layers, norm=None, bf=None, bf_idx =0, insert_idx=0, use_checkpoint=False):
+    def __init__(self, encoder_layer, num_layers, norm=None, bf=None, bf_idx =0, insert_idx=[], use_checkpoint=False):
         super().__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
@@ -119,10 +119,15 @@ class TransformerEncoder(nn.Module):
             output = layer(output, src_mask=mask,
                 src_key_padding_mask=src_key_padding_mask, pos=pos)
             if i in self.insert_idx and self.bf is not None and self.bf_idx == 3 and self.training:
+
+                L, B, C = output.shape
                 old_output = output
                 if i != self.insert_idx[0]:
-                    old_output = output[:, :len(output)//2, :]
-                    output = output[:, len(output)//2:, :]
+                    old_output = output[:, :B//2, :]
+                    output = output[:, B//2:, :]
+                    # old_output = output[:, :len(output)//2, :]
+                    # output = output[:, len(output)//2:, :]
+                    # the original batches
                 output = self.bf[i](torch.transpose(output, 1, 0))
                 output = torch.transpose(output, 1, 0)
                 output = torch.cat([old_output, output], dim=1)
