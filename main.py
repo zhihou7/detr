@@ -197,6 +197,8 @@ def main(args):
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            lr_scheduler.step_size = args.lr_drop
+            lr_scheduler.step(lr_scheduler.last_epoch)
             args.start_epoch = checkpoint['epoch'] + 1
     elif args.pretrained:
         checkpoint = torch.load(args.pretrained, map_location='cpu')
